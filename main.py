@@ -16,4 +16,11 @@ response = client.models.generate_content(
     contents="Why is Boot.dev such a great place to learn backend development? Use one paragraph maximum.",
 )
 
+if response.usage_metadata is None:
+    raise RuntimeError(
+        "Usage metadata is None. The API request may have failed."
+    )
+
+print(f"Prompt tokens: {response.usage_metadata.prompt_token_count}")
+print(f"Response tokens: {response.usage_metadata.candidates_token_count}")
 print(response.text)
