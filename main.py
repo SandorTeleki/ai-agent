@@ -1,5 +1,6 @@
 import argparse
 import os
+import sys
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types
@@ -24,41 +25,55 @@ messages: list[types.Content] = [
     types.Content(role="user", parts=[types.Part(text=args.user_prompt)])
 ]
 
-response = client.models.generate_content(
-    model="gemini-2.5-flash",
-    contents=messages,
-    config=types.GenerateContentConfig(
-        tools=[available_functions],
-        system_instruction=system_prompt,
-        temperature=0,
-    ),
-)
-
-if response.usage_metadata is None:
-    raise RuntimeError(
-        "Usage metadata is None. The API request may have failed."
-    )
-
 if args.verbose:
     print(f"User prompt: {args.user_prompt}")
-    print(f"Prompt tokens: {response.usage_metadata.prompt_token_count}")
-    print(f"Response tokens: {response.usage_metadata.candidates_token_count}")
 
-if response.function_calls:
-    function_results = []
-    for fc in response.function_calls:
-        function_call_result = call_function(fc, verbose=args.verbose)
+for _ in range(20):
+    response = client.models.generate_content(
+        model="gemini-2.5-flash",
+        contents=messages,
+        config=types.GenerateContentConfig(
+            tools=[available_functions],
+            system_instruction=system_prompt,
+            temperature=0,
+        ),
+    )
 
-        if not function_call_result.parts:
-            raise RuntimeError("Function call result has no parts")
-        if function_call_result.parts[0].function_response is None:
-            raise RuntimeError("Function call result has no function_response")
-        if function_call_result.parts[0].function_response.response is None:
-            raise RuntimeError("Function call result has no response")
+    if response.usage_metadata is None:
+        raise RuntimeError(
+            "Usage metadata is None. The API request may have failed."
+        )
 
-        function_results.append(function_call_result.parts[0])
+    if args.verbose:
+        print(f"Prompt tokens: {response.usage_metadata.prompt_token_count}")
+        print(f"Response tokens: {response.usage_metadata.candidates_token_count}")
 
-        if args.verbose:
-            print(f"-> {function_call_result.parts[0].function_response.response}")
+    # Add the model's candidates to the conversation history
+    if response.candidates:
+        for candidate in response.candidates:
+            messages.append(candidate.content)
+
+    if response.function_calls:
+        function_responses = []
+        for fc in response.function_calls:
+            function_call_result = call_function(fc, verbose=args.verbose)
+
+            if not function_call_result.parts:
+                raise RuntimeError("Function call result has no parts")
+            if function_call_result.parts[0].function_response is None:
+                raise RuntimeError("Function call result has no function_response")
+            if function_call_result.parts[0].function_response.response is None:
+                raise RuntimeError("Function call result has no response")
+
+            function_responses.append(function_call_result.parts[0])
+
+            if args.verbose:
+                print(f"-> {function_call_result.parts[0].function_response.response}")
+
+        messages.append(types.Content(role="user", parts=function_responses))
+    else:
+        print(response.text)
+        break
 else:
-    print(response.text)
+    print("Error: Maximum iterations reached without a final response.")
+    sys.exit(1)
